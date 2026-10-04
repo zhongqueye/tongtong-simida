@@ -217,7 +217,9 @@ def main() -> int:
     api._window = window
 
     def bind_drop():
-        # 拖入文件：pywebview 会在 drop 事件里附带本地完整路径
+        # 拖入文件：pywebview 会在 drop 事件里附带本地完整路径。
+        # pywebview 会把事件连同目标节点整个序列化后传给 Python，所以只绑定在一个
+        # 空的拖放层上；绑定在 document 上会把整页（含 base64 背景图）序列化，非常卡。
         try:
             from webview.dom import DOMEventHandler
 
@@ -226,9 +228,11 @@ def main() -> int:
                 paths = [f.get("pywebviewFullPath") for f in files if f.get("pywebviewFullPath")]
                 if paths:
                     window.evaluate_js(f"window.onNativeDrop({json.dumps(api.describe(paths))})")
+                else:
+                    window.evaluate_js("window.onNativeDrop([])")
 
-            window.dom.document.events.dragover += DOMEventHandler(lambda e: None, True, True)
-            window.dom.document.events.drop += DOMEventHandler(on_drop, True, True)
+            overlay = window.dom.get_element("#drop-overlay")
+            overlay.events.drop += DOMEventHandler(on_drop, True, True)
         except Exception as e:  # noqa: BLE001
             print("拖放功能不可用：", e)
 

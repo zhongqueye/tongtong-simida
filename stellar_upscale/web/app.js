@@ -132,6 +132,7 @@ function renderPicked() {
     </div>`).join("");
 }
 window.onNativeDrop = (items) => {
+  $("#drop-overlay").hidden = true;
   if (!items.length) return toast("没有识别到视频文件", true);
   addPicked(items);
   toast(`已添加 ${items.length} 个视频`);
@@ -390,11 +391,13 @@ function bindUI() {
   });
   $("#empty").onclick = pickVideos;
   // 拖放的视觉反馈；真正的文件路径由 Python 端在 drop 时回传（window.onNativeDrop）
-  let depth = 0;
-  document.addEventListener("dragenter", (e) => { e.preventDefault(); depth++; $("#dropzone").classList.add("over"); $("#empty").classList.add("over"); });
-  document.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; $("#dropzone").classList.remove("over"); $("#empty").classList.remove("over"); } });
+  // 拖入文件时显示一个空的全屏拖放层，Python 端只监听这一层的 drop（见 app.py）
+  const overlay = $("#drop-overlay");
+  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  document.addEventListener("dragenter", (e) => { if (hasFiles(e)) { e.preventDefault(); overlay.hidden = false; } });
   document.addEventListener("dragover", (e) => e.preventDefault());
-  document.addEventListener("drop", (e) => { e.preventDefault(); depth = 0; $("#dropzone").classList.remove("over"); $("#empty").classList.remove("over"); });
+  overlay.addEventListener("dragleave", (e) => { if (e.target === overlay) overlay.hidden = true; });
+  document.addEventListener("drop", (e) => { e.preventDefault(); setTimeout(() => { overlay.hidden = true; }, 0); });
 
   bindStaticSeg($("#seg-target"), "target");
   bindStaticSeg($("#seg-quality"), "quality");
