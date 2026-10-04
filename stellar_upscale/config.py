@@ -10,6 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR_DIR = ROOT / "vendor"
+# 随程序附带的模型（由 tools/convert_srvgg.py 从官方权重转换）。
+# 注意：realesrgan-ncnn-vulkan 要求模型目录路径里包含 "models"
+BUNDLED_MODELS = Path(__file__).resolve().parent / "models"
 
 
 def data_dir() -> Path:
@@ -32,18 +35,39 @@ class ModelInfo:
     scales: tuple       # 支持的放大倍数
     note: str = ""
     default_strength: float = 0.7  # 默认 AI 细节强度
+    bundled: bool = False          # 模型文件在 BUNDLED_MODELS 里
+    hidden: bool = False           # 可用但不在界面上单独列出
+
+    def models_dir(self, binary: Path) -> Path:
+        return BUNDLED_MODELS if self.bundled else binary.parent / "models"
 
 
+# 顺序即界面上的顺序
 KNOWN_MODELS = {
     "realesr-animevideov3": ModelInfo(
         "realesr-animevideov3", "快速", (2, 3, 4),
-        "速度快；全强度会有\"AI 画\"感，写实画面建议 0.2–0.4", 0.3),
+        "动漫模型，最快；适合 2D 动漫，写实画面全强度会有\"AI 画\"感", 0.3),
+    "realesr-general-x4v3": ModelInfo(
+        "realesr-general-x4v3", "写实", (4,),
+        "真实照片训练，适合仿真人和 3D；比快速慢约 2 倍", 0.6, bundled=True),
     "realesrgan-x4plus": ModelInfo(
         "realesrgan-x4plus", "精细", (4,),
-        "更偏写实，但比快速模式慢约 30 倍（10 秒视频约 2 小时）", 0.5),
+        "细节最多，但比快速慢约 30 倍（10 秒视频约 2 小时）", 0.5),
     "realesrgan-x4plus-anime": ModelInfo(
-        "realesrgan-x4plus-anime", "二次元", (4,),
-        "纯二次元画风", 1.0),
+        "realesrgan-x4plus-anime", "二次元", (4,), "纯二次元画风", 1.0, hidden=True),
+}
+
+# 画风：一键套用模型、强度、调色。参数是初版，需要按各类样片继续调
+STYLES = {
+    "real": {"label": "仿真人", "desc": "真人风 AI 漫剧：写实模型，保留皮肤质感，去灰雾",
+             "settings": {"model": "realesr-general-x4v3", "strength": 0.6, "preset": "clear",
+                          "preset_strength": 1.0, "grain": 0.3}},
+    "cg3d": {"label": "国漫 3D", "desc": "3D 渲染风：写实模型，材质和边缘更清晰，色彩更饱满",
+             "settings": {"model": "realesr-general-x4v3", "strength": 0.8, "preset": "vivid",
+                          "preset_strength": 0.8, "grain": 0.1}},
+    "anime2d": {"label": "2D 动漫", "desc": "平涂动画：动漫模型全强度，线条干净、色块平整",
+                "settings": {"model": "realesr-animevideov3", "strength": 1.0, "preset": "vivid",
+                             "preset_strength": 0.7, "grain": 0.0}},
 }
 
 NO_AI = ModelInfo("lanczos", "无 AI", (1,), "只做传统放大与调色，几乎实时", 0.0)
@@ -68,8 +92,10 @@ def available_models(binary: Path | None) -> list[ModelInfo]:
     if binary:
         mdir = binary.parent / "models"
         names = {p.stem for p in mdir.glob("*.param")} if mdir.exists() else set()
+        bundled = {p.stem for p in BUNDLED_MODELS.glob("*.param")} if BUNDLED_MODELS.exists() else set()
         for key, info in KNOWN_MODELS.items():
-            if any(n == key or n.startswith(key + "-x") for n in names):
+            pool = bundled if info.bundled else names
+            if not info.hidden and any(n == key or n.startswith(key + "-x") for n in pool):
                 models.append(info)
         # 用户自行放入的其它 ncnn 模型（按 x4 处理）
         known_files = {n for n in names
@@ -96,8 +122,9 @@ BITRATES = {
 
 @dataclass
 class JobSettings:
-    model: str = "realesr-animevideov3"
-    strength: float = 0.3          # AI 细节强度：AI 结果与传统放大的混合比例
+    style: str = "real"            # 画风（STYLES 的键），手动改过参数则为 custom
+    model: str = "realesr-general-x4v3"
+    strength: float = 0.6          # AI 细节强度：AI 结果与传统放大的混合比例
     target: str = "2k"
     preset: str = "clear"
     preset_strength: float = 1.0   # 调色强度

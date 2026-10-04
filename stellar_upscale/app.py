@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from . import APP_NAME, __version__, grade
-from .config import JobSettings, available_models, data_dir, find_realesrgan
+from .config import STYLES, JobSettings, available_models, data_dir, find_realesrgan
 from .jobs import JobManager
 from .media import MediaError, encoder_args, probe
 from .pipeline import render_preview
@@ -68,6 +68,8 @@ class Api:
             "realesrgan": str(binary) if binary else "",
             "models": models,
             "presets": [{"key": k, **v} for k, v in grade.PRESETS.items()],
+            "styles": [{"key": k, "label": v["label"], "desc": v["desc"], "settings": v["settings"]}
+                       for k, v in STYLES.items()],
             "settings": JobSettings.from_dict(prefs.get("settings")).to_dict(),
             "theme": prefs.get("theme", "dark"),
             "background": self._background_url(prefs.get("background")),

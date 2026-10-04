@@ -112,7 +112,7 @@ class Upscaler:
     def _cmd(self, src: Path, dst: Path, fmt: str | None = None) -> list[str]:
         return [str(self.binary), "-i", str(src), "-o", str(dst),
                 "-n", self.model.key, "-s", str(self.scale),
-                "-m", str(self.binary.parent / "models"),
+                "-m", str(self.model.models_dir(self.binary)),
                 "-t", str(self.tile), "-f", fmt or self.fmt]
 
     def run_dir(self, src: Path, dst: Path, on_tick: Callable[[int], None] | None = None,

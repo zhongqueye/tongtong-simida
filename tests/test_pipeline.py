@@ -114,6 +114,20 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(count_frames(out), 24)
         self.assertFalse(work.exists())
 
+    def test_realistic_model_uses_bundled_models(self):
+        from stellar_upscale.config import BUNDLED_MODELS, KNOWN_MODELS
+        from stellar_upscale.pipeline import Upscaler
+        model = KNOWN_MODELS["realesr-general-x4v3"]
+        self.assertTrue((BUNDLED_MODELS / "realesr-general-x4v3.param").exists())
+        self.assertTrue((BUNDLED_MODELS / "realesr-general-x4v3.bin").exists())
+        cmd = Upscaler(FAKE_AI, model, 4)._cmd(Path("i"), Path("o"))
+        mdir = cmd[cmd.index("-m") + 1]
+        self.assertEqual(mdir, str(BUNDLED_MODELS))
+        self.assertIn("models", mdir)  # realesrgan-ncnn-vulkan 要求路径里有 "models"
+        out = self.tmp / "real.mp4"
+        Pipeline(self.src, out, JobSettings(), self.tmp / "w", binary=FAKE_AI, chunk_frames=10).run()
+        self.assertEqual(probe(out).height, 1440)
+
     def test_no_audio(self):
         src = self.tmp / "silent.mp4"
         make_clip(src, audio=False)

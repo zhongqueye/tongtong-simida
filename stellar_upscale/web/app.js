@@ -39,6 +39,9 @@ function toast(msg, isErr = false) {
 function modelOf(key) { return env.models.find((m) => m.key === key) || env.models[0]; }
 function presetOf(key) { return env.presets.find((p) => p.key === key) || env.presets[0]; }
 function targetLabel(t) { return t === "2k" ? "2K" : "1080P"; }
+function styleOf(key) { return (env.styles || []).find((s) => s.key === key); }
+// 手动改了画风会影响的参数，就切换成"自定义"
+function markCustom() { settings.style = "custom"; }
 
 /* ---------- 设置面板 ---------- */
 
@@ -68,10 +71,25 @@ function setRange(id, v, fmt) {
 }
 
 function renderSettings() {
+  const styles = [...(env.styles || []).map((s) => ({ v: s.key, label: s.label, title: s.desc })),
+                  { v: "custom", label: "自定义", title: "保留当前的手动设置" }];
+  renderSeg($("#seg-style"), styles, settings.style || "custom", (v) => {
+    const st = styleOf(v);
+    if (st) {
+      const s = { ...st.settings };
+      if (!env.models.some((m) => m.key === s.model)) s.model = env.models[0].key;  // 模型不可用时退回
+      Object.assign(settings, s);
+    }
+    settings.style = v;
+    renderSettings();
+    persist();
+  });
+  $("#style-note").textContent = styleOf(settings.style) ? styleOf(settings.style).desc : "已手动调整参数";
   const m = modelOf(settings.model);
   renderSeg($("#seg-model"), env.models.map((x) => ({ v: x.key, label: x.label, title: x.note })), m.key, (v) => {
     settings.model = v;
     settings.strength = modelOf(v).strength;
+    markCustom();
     renderSettings();
     persist();
   });
@@ -86,6 +104,7 @@ function renderSettings() {
 
   renderSeg($("#seg-preset"), env.presets.map((p) => ({ v: p.key, label: p.label, title: p.desc })), settings.preset, (v) => {
     settings.preset = v;
+    markCustom();
     renderSettings();
     persist();
   });
@@ -105,6 +124,7 @@ function persist() {
 function bindRanges() {
   const bind = (id, key) => $(id).addEventListener("input", (e) => {
     settings[key] = parseFloat(e.target.value);
+    markCustom();
     renderSettings();
     persist();
   });
@@ -151,7 +171,9 @@ function jobCard(j) {
   const s = j.settings || {}, info = j.info || {};
   const m = env.models.find((x) => x.key === s.model);
   const pct = j.total ? Math.min(100, (j.done / j.total) * 100) : 0;
+  const st = styleOf(s.style);
   const tags = [
+    st ? `<span class="tag cyan">${esc(st.label)}</span>` : "",
     `<span class="tag pink">${esc(m ? m.label : s.model)}</span>`,
     `<span class="tag cyan">${targetLabel(s.target)}</span>`,
     `<span class="tag">${esc(presetOf(s.preset).label)}</span>`,
