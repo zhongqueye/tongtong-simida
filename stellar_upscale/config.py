@@ -59,9 +59,10 @@ KNOWN_MODELS = {
 
 # 画风：一键套用模型、强度、调色。参数是初版，需要按各类样片继续调
 STYLES = {
-    "real": {"label": "仿真人", "desc": "真人风 AI 漫剧：写实模型，保留皮肤质感，去灰雾",
-             "settings": {"model": "realesr-general-x4v3", "strength": 0.6, "preset": "clear",
-                          "preset_strength": 1.0, "grain": 0.3}},
+    # 仿真人参照用户之前在 RunningHub 上满意的流程：只做写实超分，不调色
+    "real": {"label": "仿真人", "desc": "真人风 AI 漫剧：写实模型超分，保持原片颜色（与 RunningHub 流程一致）",
+             "settings": {"model": "realesr-general-x4v3", "strength": 0.8, "preset": "original",
+                          "preset_strength": 1.0, "grain": 0.1}},
     "cg3d": {"label": "国漫 3D", "desc": "3D 渲染风：写实模型，材质和边缘更清晰，色彩更饱满",
              "settings": {"model": "realesr-general-x4v3", "strength": 0.8, "preset": "vivid",
                           "preset_strength": 0.8, "grain": 0.1}},
@@ -124,11 +125,11 @@ BITRATES = {
 class JobSettings:
     style: str = "real"            # 画风（STYLES 的键），手动改过参数则为 custom
     model: str = "realesr-general-x4v3"
-    strength: float = 0.6          # AI 细节强度：AI 结果与传统放大的混合比例
+    strength: float = 0.8          # AI 细节强度：AI 结果与传统放大的混合比例
     target: str = "2k"
-    preset: str = "clear"
+    preset: str = "original"
     preset_strength: float = 1.0   # 调色强度
-    grain: float = 0.3             # 胶片颗粒 0–1，让画面不过分光滑
+    grain: float = 0.1             # 胶片颗粒 0–1，让画面不过分光滑
     quality: str = "standard"
     codec: str = "hevc"            # hevc（体积小）/ h264（兼容性最好）
     output_dir: str = ""           # 为空则输出到原视频所在目录

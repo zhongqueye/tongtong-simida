@@ -142,6 +142,22 @@ class PipelineTest(unittest.TestCase):
 
 
 class GradeTest(unittest.TestCase):
+    def test_grade_does_not_crush_shadow_detail(self):
+        """暗部层次：相邻的暗灰（发丝之间的明暗差）调色后差距不能被压没。（回归：旧版黑位把头发压成纯黑）"""
+        levels = [12, 20, 28, 36, 48]
+        src = "".join(f"color=c=0x{v:02x}{v:02x}{v:02x}:s=16x16:d=0.04,format=gbrp[p{i}];" for i, v in enumerate(levels))
+        src += "".join(f"[p{i}]" for i in range(len(levels))) + f"hstack={len(levels)},format=gbrp[in];"
+        for preset in grade.PRESETS:
+            fc = src + grade.build_grade_graph(preset, 1.0, "in", "out") + ";[out]format=rgb24[v]"
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "nullsrc=s=16x16:d=0.04",
+                                  "-filter_complex", fc, "-map", "[v]", "-frames:v", "1",
+                                  "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+            width = 16 * len(levels)
+            out = [raw[(8 * width + i * 16 + 8) * 3 + 1] for i in range(len(levels))]  # G 通道
+            for a, b, va, vb in zip(levels, levels[1:], out, out[1:]):
+                self.assertGreaterEqual(vb - va, (b - a) * 0.75, f"{preset}: {levels} -> {out}")
+            self.assertGreaterEqual(out[0], 6, f"{preset}: 暗部被压成纯黑 {levels} -> {out}")
+
     def test_grade_graph_runs_for_all_presets(self):
         for preset in grade.PRESETS:
             for k in (0, 0.5, 1.5):
@@ -175,7 +191,7 @@ class GradeTest(unittest.TestCase):
             "purple_black": (25, 23, 28), "brown_black": (44, 38, 45), "gray_dark": (30, 30, 30),
             "gray_mid": (128, 128, 128), "skin": (200, 160, 140),
         }
-        src = "".join(f"color=c=0x{r:02x}{g:02x}{b:02x}:s=16x16:d=0.04[p{i}];"
+        src = "".join(f"color=c=0x{r:02x}{g:02x}{b:02x}:s=16x16:d=0.04,format=gbrp[p{i}];"
                       for i, (r, g, b) in enumerate(patches.values()))
         src += "".join(f"[p{i}]" for i in range(len(patches))) + f"hstack={len(patches)},format=gbrp[in];"
         for preset in grade.PRESETS:
@@ -189,8 +205,9 @@ class GradeTest(unittest.TestCase):
                     off = (8 * width + i * 16 + 8) * 3  # 每块中心像素
                     r, g, b = raw[off], raw[off + 1], raw[off + 2]
                     ctx = f"{preset} k={k} {name}: {(r0, g0, b0)} -> {(r, g, b)}"
-                    if preset == "cinema":  # 电影感有意给暗部加冷色（偏蓝），但不能偏绿
-                        self.assertLessEqual(g - (r + b) / 2, 0.5, ctx)
+                    if preset == "cinema":  # 电影感有意让暗部偏冷（蓝）、亮部偏暖（橙），但暗部不能偏绿
+                        if max(r0, g0, b0) < 60:
+                            self.assertLessEqual(g - (r + b) / 2, 0.5, ctx)
                     elif r0 == g0 == b0:
                         self.assertLessEqual(max(r, g, b) - min(r, g, b), 2, ctx)  # 灰色不带色
                     elif max(r, g, b) < 6:  # 压到接近纯黑：只要求不带色
