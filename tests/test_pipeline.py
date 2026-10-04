@@ -150,6 +150,17 @@ class GradeTest(unittest.TestCase):
                 subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=64x36:d=0.1",
                                 "-vf", vf, "-f", "null", "-"], check=True)
 
+    def test_style_normalization(self):
+        from stellar_upscale.config import STYLES
+        # 旧版本保存的设置（没有 style 字段）→ 自定义
+        self.assertEqual(JobSettings.from_dict({"model": "realesr-animevideov3", "strength": 0.3}).style, "custom")
+        # 画风与参数一致 → 保留；不一致 → 自定义
+        self.assertEqual(JobSettings.from_dict({"style": "real", **STYLES["real"]["settings"]}).style, "real")
+        self.assertEqual(JobSettings.from_dict({"style": "real", **STYLES["real"]["settings"], "grain": 0.5}).style,
+                         "custom")
+        self.assertEqual(JobSettings.from_dict({}).style, "real")  # 全新安装用默认画风
+        self.assertEqual(JobSettings.from_dict({"style": "anime2d", **STYLES["anime2d"]["settings"]}).style, "anime2d")
+
     def test_target_size(self):
         class Info:
             width, height = 720, 1280

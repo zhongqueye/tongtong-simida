@@ -136,9 +136,25 @@ class JobSettings:
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "JobSettings":
-        d = d or {}
+        d = dict(d or {})
+        if d and "style" not in d:
+            d["style"] = "custom"  # 旧版本保存的设置没有"画风"，不能默认当成仿真人
         known = {f for f in cls.__dataclass_fields__}
-        return cls(**{k: v for k, v in d.items() if k in known})
+        obj = cls(**{k: v for k, v in d.items() if k in known})
+        obj.normalize_style()
+        return obj
+
+    def normalize_style(self) -> None:
+        """参数和所选画风的预设对不上时，改标为"自定义"，避免标签误导。"""
+        preset = STYLES.get(self.style)
+        if preset is None:
+            self.style = "custom"
+            return
+        for k, v in preset["settings"].items():
+            cur = getattr(self, k)
+            if (abs(cur - v) > 1e-6) if isinstance(v, float) else cur != v:
+                self.style = "custom"
+                return
 
     def to_dict(self) -> dict:
         return asdict(self)

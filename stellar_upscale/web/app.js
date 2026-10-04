@@ -450,6 +450,9 @@ async function boot(theApi) {
   env = await api.env();
   settings = env.settings;
   if (!env.models.some((m) => m.key === settings.model)) settings.model = env.models[0].key;
+  // 参数和画风预设对不上（比如模型不可用被替换了）就显示为"自定义"
+  const st0 = styleOf(settings.style);
+  if (st0 && Object.entries(st0.settings).some(([k, v]) => settings[k] !== v)) settings.style = "custom";
   applyTheme(env.theme);
   applyBackground(env.background);
   const warn = [];
