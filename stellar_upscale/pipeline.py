@@ -251,13 +251,19 @@ class Pipeline:
         chunks = [chunk_dir / f"c{i:05d}.mp4" for i in range(len(starts))]
         done_frames = sum(min(self.chunk_frames, total - s) for s, c in zip(starts, chunks) if c.exists())
         t0, processed = time.monotonic(), 0
+        last = {"cur": 0.0, "t": t0}  # 上一次帧数变化的时刻，用来算稳定的剩余时间
 
-        def report(extra: int = 0) -> None:
-            elapsed = time.monotonic() - t0
+        def report(extra: float = 0) -> None:
+            now = time.monotonic()
             cur = processed + extra
-            remaining = total - done_frames - cur
-            eta = remaining * elapsed / cur if cur > 0 and elapsed > 3 else None
-            self.on_progress(Progress("upscale", done_frames + cur, total, eta,
+            if cur > last["cur"]:
+                last["cur"], last["t"] = cur, now
+            eta = None
+            if last["cur"] > 0 and last["t"] - t0 > 3:
+                per_frame = (last["t"] - t0) / last["cur"]
+                remaining = total - done_frames - last["cur"]
+                eta = max(0.0, remaining * per_frame - (now - last["t"]))
+            self.on_progress(Progress("upscale", int(done_frames + cur), total, eta,
                                       f"{model.label} ×{scale}" if use_ai else "传统放大"))
 
         report()
