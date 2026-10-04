@@ -42,6 +42,7 @@ class Progress:
     total: int = 0
     eta: float | None = None   # 秒
     message: str = ""
+    timing: dict | None = None  # 完成时的用时分解（秒）
 
 
 # ---------- 工具函数 ----------
@@ -195,6 +196,13 @@ class Pipeline:
             done.write_text(str(sum(1 for _ in frames.glob("*.png"))))
         return int(done.read_text())
 
+    def _timed_encode(self, timing: dict, *args) -> None:
+        t = time.monotonic()
+        try:
+            self._encode_chunk(*args)
+        finally:
+            timing["encode"] += time.monotonic() - t
+
     def _encode_chunk(self, info, size, use_ai, start, count, ai_dir, out: Path, bitrate) -> None:
         fps = info.fps_str
         frames = self.work / "frames"
@@ -254,7 +262,10 @@ class Pipeline:
         upscaler = Upscaler(self.binary, model, scale, self.settings.tile) if use_ai else None
 
         self._prepare_workdir(info)
+        timing = {"extract": 0.0, "ai": 0.0, "encode": 0.0, "wait": 0.0, "mux": 0.0}
+        t_ext = time.monotonic()
         total = self._extract(info)
+        timing["extract"] = time.monotonic() - t_ext
         if total == 0:
             raise MediaError("没有解出任何帧")
         frames = self.work / "frames"
@@ -320,18 +331,24 @@ class Pipeline:
                             os.link(frames / name, cin / name)
                         except OSError:
                             shutil.copy2(frames / name, cin / name)
+                    t_ai = time.monotonic()
                     upscaler.run_dir(cin, ai_dir, on_tick=lambda n: report(min(n, count) * 0.95),
                                      cancel=self.cancel)
                     got = sum(1 for _ in ai_dir.glob(f"*.{AI_FORMAT}"))
                     if got != count:
                         raise MediaError(f"AI 超分输出帧数不对（{got}/{count}）")
+                    timing["ai"] += time.monotonic() - t_ai
+                t_wait = time.monotonic()
                 finish_pending()  # 同一时间最多一段在编码
-                fut = encoder.submit(self._encode_chunk, info, size, use_ai, start, count,
+                timing["wait"] += time.monotonic() - t_wait
+                fut = encoder.submit(self._timed_encode, timing, info, size, use_ai, start, count,
                                      ai_dir, chunk, bitrate)
                 pending = (fut, dirs)
                 processed += count
                 report()
-            finish_pending()
+            t_wait = time.monotonic()
+            finish_pending()  # 最后一段的编码
+            timing["wait"] += time.monotonic() - t_wait
         except BaseException:
             # 出错或暂停：等后台那一段编完再退出，续跑时可以直接复用
             if pending is not None:
@@ -343,10 +360,14 @@ class Pipeline:
         finally:
             encoder.shutdown(wait=True)
 
+        t_mux = time.monotonic()
         self.on_progress(Progress("mux", total, total, 0, "正在合成音视频"))
         self._mux(info, chunks)
+        timing["mux"] = time.monotonic() - t_mux
         shutil.rmtree(self.work, ignore_errors=True)
-        self.on_progress(Progress("done", total, total, 0, "完成"))
+        timing = {k: round(v, 1) for k, v in timing.items()}
+        timing["frames"] = total - done_frames  # 本次实际处理的帧数（续跑时不含之前完成的）
+        self.on_progress(Progress("done", total, total, 0, "完成", timing))
         return self.output
 
 

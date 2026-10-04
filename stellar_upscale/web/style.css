@@ -72,6 +72,7 @@ svg .fill { fill: currentColor; stroke: none; }
 .a3 { width: 460px; height: 460px; left: 30%; top: 60%; background: #2aa3a8; opacity: .3; animation-delay: -16s; }
 :root[data-theme="light"] .aurora { opacity: .28; }
 @keyframes drift { to { transform: translate(-60px, 40px) scale(1.08); } }
+body.busy .aurora { animation-play-state: paused; }
 
 /* ---------- 布局 ---------- */
 .app { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; gap: 18px; padding: 18px; }
@@ -129,21 +130,20 @@ svg .fill { fill: currentColor; stroke: none; }
 .bar { flex: 1 1 100px; max-width: 160px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .14); overflow: hidden; flex: none; }
 :root[data-theme="light"] .bar { background: rgba(30, 45, 80, .12); }
 .bar i { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--grad); transition: width .5s; }
-.job.running .bar i { background-size: 200% 100%; animation: flow 2.4s linear infinite; background-image: linear-gradient(90deg, #a4e3e3, #f4a8cf, #a4e3e3); }
-@keyframes flow { to { background-position: -200% 0; } }
+/* 处理时界面尽量不占 GPU：不用无限循环的动画（进度条/状态点/背景光斑都静止），把 GPU 留给超分 */
 .err { color: var(--red); font-size: 12.5px; white-space: pre-wrap; max-height: 54px; overflow: auto; user-select: text; }
 .job-right { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 16px; max-width: 280px; }
 .job-right .ops { flex-wrap: wrap; justify-content: flex-end; }
 .status { display: inline-flex; align-items: center; gap: 7px; padding: 5px 14px; border-radius: 999px; font-size: 13.5px; background: var(--chip); white-space: nowrap; }
 .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status.running { color: var(--green); background: rgba(95, 224, 161, .1); }
-.status.running::before { animation: pulse 1.4s infinite; }
+.status.running::before { box-shadow: 0 0 0 3px rgba(95, 224, 161, .18); }
 .status.queued { color: var(--yellow); background: rgba(243, 201, 105, .1); }
 .status.done { color: var(--cyan); background: rgba(159, 227, 230, .1); }
 :root[data-theme="light"] .status.done { color: #23838a; }
 .status.failed { color: var(--red); background: rgba(255, 123, 138, .1); }
 .status.paused { color: var(--text-2); }
-@keyframes pulse { 50% { opacity: .3; } }
+
 .ops { display: flex; gap: 6px; }
 .op { padding: 5px 10px; border-radius: 8px; color: var(--text-2); font-size: 14px; white-space: nowrap; }
 .op:hover { background: var(--chip); color: var(--text); }

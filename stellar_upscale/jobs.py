@@ -35,6 +35,7 @@ class Job:
     created: float = field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
+    timing: dict = field(default_factory=dict)  # 用时分解：extract / ai / encode / wait / mux（秒）
 
     @property
     def name(self) -> str:
@@ -186,6 +187,8 @@ class JobManager:
                 with self.lock:
                     job.stage, job.done, job.total, job.eta, job.message = (
                         p.stage, p.done, p.total or job.total, p.eta, p.message)
+                    if p.timing:
+                        job.timing = p.timing
 
             try:
                 Pipeline(job.src, job.output, JobSettings.from_dict(job.settings),

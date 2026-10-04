@@ -184,7 +184,10 @@ function jobCard(j) {
   let midTitle, midSub, progress;
   if (j.status === "done") {
     midTitle = esc(j.output_name);
-    midSub = `用时 ${fmtTime(j.elapsed)} · 完成于 ${fmtDate(j.finished)}${j.output_exists ? "" : " · 文件已移动或删除"}`;
+    const t = j.timing || {};
+    const aiPart = t.ai ? ` · AI ${fmtTime(t.ai)}${t.frames ? `（${(t.ai / t.frames).toFixed(2)} 秒/帧）` : ""}` : "";
+    const waitPart = t.wait > 5 ? ` · 等编码 ${fmtTime(t.wait)}` : "";
+    midSub = `用时 ${fmtTime(j.elapsed)}${aiPart}${waitPart} · 完成于 ${fmtDate(j.finished)}${j.output_exists ? "" : " · 文件已移动或删除"}`;
     progress = `<div class="progress"><div class="bar"><i style="width:100%"></i></div>已处理 ${j.total} / ${j.total} 帧</div>`;
   } else if (j.status === "running") {
     midTitle = esc(j.message || "处理中");
@@ -240,27 +243,45 @@ function renderJobs() {
   $("#list-title").textContent = titles[filter];
   $("#list-count").textContent = `${list.length} 个`;
   $("#empty").hidden = list.length > 0 || (jobs.length > 0 && filter !== "all");
-  const html = list.map(jobCard).join("");
-  if (html !== renderJobs._last) {
-    $("#job-list").innerHTML = html;
-    renderJobs._last = html;
+  // 只重绘变化了的那张卡片（处理中每秒只有进度那张在变），减少界面占用的 GPU
+  const box = $("#job-list");
+  const cards = list.map((j) => [j.id, jobCard(j)]);
+  const ids = cards.map((c) => c[0]).join(",");
+  if (ids !== renderJobs._ids) {
+    box.innerHTML = cards.map((c) => c[1]).join("");
+    renderJobs._ids = ids;
+    renderJobs._cache = Object.fromEntries(cards);
+  } else {
+    for (const [id, html] of cards) {
+      if (renderJobs._cache[id] === html) continue;
+      const el = box.querySelector(`.job[data-id="${id}"]`);
+      if (el) el.outerHTML = html;
+      renderJobs._cache[id] = html;
+    }
   }
   const recent = groups.done.slice().sort((a, b) => b.finished - a.finished).slice(0, 4);
-  $("#recent-list").innerHTML = recent.length ? recent.map((j) => `
+  const recentHtml = recent.length ? recent.map((j) => `
     <div class="recent-item" data-id="${j.id}">
       <div class="info"><div class="n" title="${esc(j.output)}">${esc(j.output_name)}</div>
       <div class="s">${targetLabel(j.settings.target)} · 用时 ${fmtTime(j.elapsed)} · ${fmtDate(j.finished)}</div></div>
       <button class="op" data-act="reveal">打开</button>
     </div>`).join("") : `<div class="recent-empty">还没有完成的视频</div>`;
+  if (recentHtml !== renderJobs._recent) {
+    $("#recent-list").innerHTML = recentHtml;
+    renderJobs._recent = recentHtml;
+  }
 }
 
 async function poll() {
   try {
     jobs = await api.jobs();
-    renderJobs();
+    const busy = jobs.some((j) => j.status === "running");
+    document.body.classList.toggle("busy", busy);
+    if (!document.hidden) renderJobs();  // 窗口最小化/被挡住时不重绘
   } catch (e) { /* 忽略 */ }
-  setTimeout(poll, jobs.some((j) => j.status === "running") ? 700 : 1500);
+  setTimeout(poll, 1500);
 }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && jobs.length) renderJobs(); });
 
 async function jobAction(id, act) {
   const j = jobs.find((x) => x.id === id);
