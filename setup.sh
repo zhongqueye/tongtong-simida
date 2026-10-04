@@ -33,6 +33,15 @@ else
   for cand in "./${RE_ZIP}" "vendor/${RE_ZIP}" "$HOME/Downloads/${RE_ZIP}"; do
     if [ -f "$cand" ] && unzip -tq "$cand" >/dev/null 2>&1; then ZIP="$cand"; echo "使用已下载的 $cand"; break; fi
   done
+  # Safari 会自动解压：也接受解压好的文件夹
+  DIR_NAME="${RE_ZIP%.zip}"
+  for cand in "./${DIR_NAME}" "$HOME/Downloads/${DIR_NAME}"; do
+    if [ -z "$ZIP" ] && [ -f "$cand/realesrgan-ncnn-vulkan" ]; then
+      echo "使用已解压的 $cand"
+      cp -R "$cand/." vendor/realesrgan/
+      ZIP="(dir)"
+    fi
+  done
   if [ -z "$ZIP" ]; then
     ZIP="vendor/realesrgan.zip"
     # 断点续传 + 超时重试；GitHub 在国内可能很慢
@@ -47,7 +56,7 @@ else
     fi
     mv "${ZIP}.part" "$ZIP"
   fi
-  unzip -oq "$ZIP" -d vendor/realesrgan
+  [ "$ZIP" = "(dir)" ] || unzip -oq "$ZIP" -d vendor/realesrgan
   [ "$ZIP" = "vendor/realesrgan.zip" ] && rm -f "$ZIP"
   find vendor/realesrgan -name realesrgan-ncnn-vulkan -exec chmod +x {} \;
   # 去掉 macOS 的"来自互联网"隔离标记，否则会被系统拦截
