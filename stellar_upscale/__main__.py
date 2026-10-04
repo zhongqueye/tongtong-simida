@@ -41,7 +41,8 @@ def main(argv=None) -> int:
     ap.add_argument("-p", "--preset", choices=list(grade.PRESETS))
     ap.add_argument("--preset-strength", type=float, help="调色强度 0–1.5")
     ap.add_argument("-g", "--grain", type=float, help="胶片颗粒 0–1")
-    ap.add_argument("-q", "--quality", choices=["standard", "high"], default="standard")
+    ap.add_argument("-q", "--quality", choices=["upload", "standard", "high"], default="standard",
+                    help="upload（发平台，1080P 5Mbps）/ standard（12Mbps）/ high（18Mbps）")
     ap.add_argument("-c", "--codec", choices=["hevc", "h264"], default="hevc",
                     help="hevc（体积小）/ h264（兼容性最好）")
     ap.add_argument("--tile", type=int, default=0, help="AI 分块大小，0=自动；内存不足时设 256")
