@@ -91,18 +91,16 @@ def build_filter(settings: JobSettings, info: VideoInfo, size: tuple[int, int], 
     """输入 0 = AI 超分帧，输入 1 = 原始帧（不用 AI 时只有输入 0 = 原始帧）。输出标签 [v]。"""
     w, h = size
     up = f"scale={w}:{h}:flags=lanczos,setsar=1"
-    tail = grade.build_grade(settings.preset, settings.preset_strength)
-    tail += grade.build_sharpen(settings.preset, settings.preset_strength)
+    tail = grade.build_sharpen(settings.preset, settings.preset_strength)
     tail.append(f"scale=out_color_matrix={_matrix(info)}:out_range=tv,format=yuv420p")
     tail += grade.build_grain(settings.grain)  # 只加在亮度上，不产生彩色噪点
-    chain = ",".join(tail)
+    graded = grade.build_grade_graph(settings.preset, settings.preset_strength, "pre", "graded")
+    finish = f"{graded};[graded]{','.join(tail)}[v]"
     s = max(0.0, min(1.0, float(settings.strength)))
-    if not use_ai:
-        return f"[0:v]{up},{chain}[v]"
-    if s >= 0.999:
-        return f"[0:v]{up},{chain}[v]"
+    if not use_ai or s >= 0.999:
+        return f"[0:v]{up}[pre];{finish}"
     return (f"[0:v]{up},format=gbrp[ai];[1:v]{up},format=gbrp[base];"
-            f"[ai][base]blend=all_mode=normal:all_opacity={s:.3f},{chain}[v]")
+            f"[ai][base]blend=all_mode=normal:all_opacity={s:.3f}[pre];{finish}")
 
 
 class Upscaler:

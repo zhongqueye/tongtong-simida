@@ -142,6 +142,14 @@ class PipelineTest(unittest.TestCase):
 
 
 class GradeTest(unittest.TestCase):
+    def test_grade_graph_runs_for_all_presets(self):
+        for preset in grade.PRESETS:
+            for k in (0, 0.5, 1.5):
+                fc = ("[0:v]format=gbrp[in];" + grade.build_grade_graph(preset, k, "in", "out")
+                      + ";[out]format=yuv420p[v]")
+                subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=64x36:d=0.1",
+                                "-filter_complex", fc, "-map", "[v]", "-f", "null", "-"], check=True)
+
     def test_all_presets_are_valid_ffmpeg(self):
         for preset in grade.PRESETS:
             for k in (0, 0.5, 1.5):
@@ -160,6 +168,38 @@ class GradeTest(unittest.TestCase):
                          "custom")
         self.assertEqual(JobSettings.from_dict({}).style, "real")  # 全新安装用默认画风
         self.assertEqual(JobSettings.from_dict({"style": "anime2d", **STYLES["anime2d"]["settings"]}).style, "anime2d")
+
+    def test_grade_keeps_hue_of_dark_and_neutral_colors(self):
+        """调色不能让黑头发偏绿：暗部色调方向保持，灰色保持中性。（回归：eq 滤镜曾把暗部带绿）"""
+        patches = {  # 原片里实测的发色，以及中性灰
+            "purple_black": (25, 23, 28), "brown_black": (44, 38, 45), "gray_dark": (30, 30, 30),
+            "gray_mid": (128, 128, 128), "skin": (200, 160, 140),
+        }
+        src = "".join(f"color=c=0x{r:02x}{g:02x}{b:02x}:s=16x16:d=0.04[p{i}];"
+                      for i, (r, g, b) in enumerate(patches.values()))
+        src += "".join(f"[p{i}]" for i in range(len(patches))) + f"hstack={len(patches)},format=gbrp[in];"
+        for preset in grade.PRESETS:
+            for k in (0.5, 1.0, 1.5):
+                fc = src + grade.build_grade_graph(preset, k, "in", "out") + ";[out]format=rgb24[v]"
+                raw = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "nullsrc=s=16x16:d=0.04",
+                                      "-filter_complex", fc, "-map", "[v]", "-frames:v", "1",
+                                      "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+                width = 16 * len(patches)
+                for i, (name, (r0, g0, b0)) in enumerate(patches.items()):
+                    off = (8 * width + i * 16 + 8) * 3  # 每块中心像素
+                    r, g, b = raw[off], raw[off + 1], raw[off + 2]
+                    ctx = f"{preset} k={k} {name}: {(r0, g0, b0)} -> {(r, g, b)}"
+                    if preset == "cinema":  # 电影感有意给暗部加冷色（偏蓝），但不能偏绿
+                        self.assertLessEqual(g - (r + b) / 2, 0.5, ctx)
+                    elif r0 == g0 == b0:
+                        self.assertLessEqual(max(r, g, b) - min(r, g, b), 2, ctx)  # 灰色不带色
+                    elif max(r, g, b) < 6:  # 压到接近纯黑：只要求不带色
+                        self.assertLessEqual(max(r, g, b) - min(r, g, b), 2, ctx)
+                    else:
+                        green0 = g0 - (r0 + b0) / 2
+                        green = g - (r + b) / 2
+                        self.assertLess(green, 0.5, ctx)  # 原本绿色最弱的，处理后不能变成绿色偏多
+                        self.assertLessEqual(green, green0 * 0.3 + 0.5, ctx)
 
     def test_target_size(self):
         class Info:
