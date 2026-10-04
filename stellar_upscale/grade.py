@@ -66,6 +66,13 @@ def build_sharpen(preset: str, k: float = 1.0) -> list[str]:
     return [f"cas=strength={_f(min(amount, 1.0))}"] if amount > 0 else []
 
 
+def build_2k_compensation() -> list[str]:
+    """2K 锐化补偿：同样的细节在 2K 上摊得更开，按实际大小看比 1080P 软（实测锐度约 80%）。
+    在最终 yuv420p 的亮度上做 5×5 USM（不动色度，不会偏色），实测锐度回到 1080P 的 97–100%，
+    再加大会出现白边和颗粒感。AI 先放大到 4K 再缩到 2K 实测没有改善，所以用锐化补偿。"""
+    return ["unsharp=5:5:0.6:5:5:0"]
+
+
 def build_grain(amount: float) -> list[str]:
     """细微的动态颗粒：掩盖放大后的"塑料感"，让皮肤和暗部更像实拍。"""
     a = max(0.0, min(1.0, float(amount)))

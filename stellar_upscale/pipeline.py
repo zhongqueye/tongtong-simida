@@ -29,6 +29,8 @@ CHUNK_FRAMES = 48
 # PNG 压缩 2K 图很耗 CPU，换成 JPEG 能省下 AI 组件存图的时间
 AI_FORMAT = "jpg"
 PIPELINE_VERSION = 1
+# 后来新增的设置项：取默认值时不计入续跑签名，升级后之前暂停的任务仍能从断点继续
+_SIG_OPTIONAL = {"sharpen_2k": False}
 
 
 class Cancelled(Exception):
@@ -95,6 +97,8 @@ def build_filter(settings: JobSettings, info: VideoInfo, size: tuple[int, int], 
     tail = grade.build_grade(settings.preset, settings.preset_strength)
     tail += grade.build_sharpen(settings.preset, settings.preset_strength)
     tail.append(f"scale=out_color_matrix={_matrix(info)}:out_range=tv,format=yuv420p")
+    if settings.sharpen_2k_on:
+        tail += grade.build_2k_compensation()  # 只锐化亮度，放在颗粒之前，不把颗粒也锐化
     tail += grade.build_grain(settings.grain)  # 只加在亮度上，不产生彩色噪点
     chain = ",".join(tail)
     s = max(0.0, min(1.0, float(settings.strength)))
@@ -161,9 +165,11 @@ class Pipeline:
     # 设置或源文件变了，旧的中间结果就作废
     def _signature(self, info: VideoInfo) -> str:
         st = self.src.stat()
+        settings = {k: v for k, v in self.settings.to_dict().items()
+                    if not (k in _SIG_OPTIONAL and v == _SIG_OPTIONAL[k])}
         payload = json.dumps({
             "v": PIPELINE_VERSION, "src": str(self.src), "size": st.st_size, "mtime": st.st_mtime,
-            "settings": self.settings.to_dict(), "frames": info.frames,
+            "settings": settings, "frames": info.frames,
             "chunk": self.chunk_frames,
         }, sort_keys=True)
         return hashlib.sha1(payload.encode()).hexdigest()

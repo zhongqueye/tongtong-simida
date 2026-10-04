@@ -114,6 +114,37 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(count_frames(out), 24)
         self.assertFalse(work.exists())
 
+    def test_sharpen_2k(self):
+        """2K 锐化补偿：只在 2K 生效、只锐化亮度、在颗粒之前；默认关闭时续跑签名与旧版本一致。"""
+        from stellar_upscale.pipeline import build_filter
+        info = probe(self.src)
+        on = JobSettings(model="realesr-animevideov3", strength=0.3, sharpen_2k=True, grain=0.3)
+        flt = build_filter(on, info, (2560, 1440), True)
+        self.assertIn("format=yuv420p,unsharp=5:5:0.6:5:5:0,noise=", flt)
+        self.assertNotIn("unsharp", build_filter(JobSettings(model="realesr-animevideov3", strength=0.3),
+                                                 info, (2560, 1440), True))
+        off_1080 = JobSettings(target="1080p", sharpen_2k=True)
+        self.assertNotIn("unsharp", build_filter(off_1080, info, (1920, 1080), True))
+        self.assertEqual(JobSettings.from_dict({"sharpen_2k": True}).sharpen_2k, True)
+
+        # 升级前保存的任务（设置里没有 sharpen_2k）续跑时不能因为签名变化而丢掉已完成的段
+        work = self.tmp / "w"
+        new_sig = Pipeline(self.src, self.tmp / "o.mp4", JobSettings(), work)._signature(info)
+        orig = JobSettings.to_dict
+        try:
+            JobSettings.to_dict = lambda self: {k: v for k, v in orig(self).items() if k != "sharpen_2k"}
+            old_sig = Pipeline(self.src, self.tmp / "o.mp4", JobSettings(), work)._signature(info)
+        finally:
+            JobSettings.to_dict = orig
+        self.assertEqual(new_sig, old_sig)
+        self.assertNotEqual(new_sig, Pipeline(self.src, self.tmp / "o.mp4", on, work)._signature(info))
+
+        out = self.tmp / "s2k.mp4"
+        Pipeline(self.src, out, on, self.tmp / "w2", binary=FAKE_AI, chunk_frames=12).run()
+        info2 = probe(out)
+        self.assertEqual((info2.width, info2.height), (2560, 1440))
+        self.assertEqual(count_frames(out), 24)
+
     def test_realistic_model_uses_bundled_models(self):
         from stellar_upscale.config import BUNDLED_MODELS, KNOWN_MODELS
         from stellar_upscale.pipeline import Upscaler

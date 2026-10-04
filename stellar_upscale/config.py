@@ -128,6 +128,7 @@ class JobSettings:
     model: str = "realesr-general-x4v3"
     strength: float = 0.6          # AI 细节强度：AI 结果与传统放大的混合比例
     target: str = "2k"
+    sharpen_2k: bool = False       # 2K 锐化补偿：按实际大小看接近 1080P 的清晰度，不增加用时
     preset: str = "clear"
     preset_strength: float = 1.0   # 调色强度
     grain: float = 0.3             # 胶片颗粒 0–1，让画面不过分光滑
@@ -157,6 +158,10 @@ class JobSettings:
             if (abs(cur - v) > 1e-6) if isinstance(v, float) else cur != v:
                 self.style = "custom"
                 return
+
+    @property
+    def sharpen_2k_on(self) -> bool:
+        return bool(self.sharpen_2k) and self.target == "2k"
 
     def to_dict(self) -> dict:
         return asdict(self)

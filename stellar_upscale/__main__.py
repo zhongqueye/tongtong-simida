@@ -38,6 +38,8 @@ def main(argv=None) -> int:
                                           " / realesrgan-x4plus（精细）/ lanczos（无 AI）")
     ap.add_argument("-s", "--strength", type=float, help="AI 细节强度 0–1")
     ap.add_argument("-t", "--target", choices=list(TARGETS), default="2k")
+    ap.add_argument("--sharpen-2k", action="store_true",
+                    help="2K 锐化补偿：按实际大小看接近 1080P 的清晰度（只对 2K 有效，不增加用时）")
     ap.add_argument("-p", "--preset", choices=list(grade.PRESETS))
     ap.add_argument("--preset-strength", type=float, help="调色强度 0–1.5")
     ap.add_argument("-g", "--grain", type=float, help="胶片颗粒 0–1")
@@ -52,7 +54,7 @@ def main(argv=None) -> int:
     overrides = {k: getattr(args, k) for k in ("model", "strength", "preset", "preset_strength", "grain")
                  if getattr(args, k) is not None}
     settings = JobSettings(style="custom" if overrides else args.style, **{**style, **overrides},
-                           target=args.target, quality=args.quality, codec=args.codec,
+                           target=args.target, sharpen_2k=args.sharpen_2k, quality=args.quality, codec=args.codec,
                            output_dir=args.output_dir, tile=args.tile)
     cancel = threading.Event()
     rc = 0

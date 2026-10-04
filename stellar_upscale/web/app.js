@@ -101,6 +101,15 @@ function renderSettings() {
   $$("#seg-target button").forEach((b) => b.classList.toggle("on", b.dataset.v === settings.target));
   $$("#seg-quality button").forEach((b) => b.classList.toggle("on", b.dataset.v === settings.quality));
   $$("#seg-codec button").forEach((b) => b.classList.toggle("on", b.dataset.v === (settings.codec || "hevc")));
+  const s2kOn = !!settings.sharpen_2k, is2k = settings.target === "2k";
+  $$("#seg-s2k button").forEach((b) => {
+    b.classList.toggle("on", (b.dataset.v === "on") === s2kOn);
+    b.disabled = !is2k;
+  });
+  $("#field-s2k").style.opacity = is2k ? 1 : 0.45;
+  $("#s2k-note").textContent = !is2k ? "只对 2K 有效（1080P 本来就是从 2K 缩小的）"
+    : s2kOn ? "在 2K 上补一点亮度锐化，按实际大小看接近 1080P，不增加用时"
+    : "2K 按实际大小看会比 1080P 软一些；只是发抖音的话不影响";
 
   renderSeg($("#seg-preset"), env.presets.map((p) => ({ v: p.key, label: p.label, title: p.desc })), settings.preset, (v) => {
     settings.preset = v;
@@ -175,7 +184,7 @@ function jobCard(j) {
   const tags = [
     st ? `<span class="tag cyan">${esc(st.label)}</span>` : "",
     `<span class="tag pink">${esc(m ? m.label : s.model)}</span>`,
-    `<span class="tag cyan">${targetLabel(s.target)}</span>`,
+    `<span class="tag cyan">${targetLabel(s.target)}${s.sharpen_2k && s.target === "2k" ? " 锐化补偿" : ""}</span>`,
     `<span class="tag">${esc(presetOf(s.preset).label)}</span>`,
     m && m.ai ? `<span class="tag">AI ${Math.round(s.strength * 100)}%</span>` : "",
     s.codec === "h264" ? `<span class="tag">H.264</span>` : "",
@@ -445,6 +454,13 @@ function bindUI() {
   bindStaticSeg($("#seg-target"), "target");
   bindStaticSeg($("#seg-quality"), "quality");
   bindStaticSeg($("#seg-codec"), "codec");
+  $("#seg-s2k").onclick = (e) => {
+    const b = e.target.closest("button");
+    if (!b || b.disabled) return;
+    settings.sharpen_2k = b.dataset.v === "on";
+    renderSettings();
+    persist();
+  };
   bindRanges();
   $("#btn-out").onclick = async () => {
     const dir = await api.pick_folder();
