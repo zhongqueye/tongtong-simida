@@ -31,6 +31,7 @@ def count_frames(path: Path) -> int:
 
 
 NO_AI = dict(model="lanczos")
+FAKE_AI = Path(__file__).with_name("fake_realesrgan.py")
 
 
 class PipelineTest(unittest.TestCase):
@@ -95,6 +96,23 @@ class PipelineTest(unittest.TestCase):
                          ("bt709", "bt709", "bt709"))
         self.assertEqual(a["sample_rate"], "48000")
         self.assertEqual(count_frames(out), 24)
+
+    def test_ai_path_overlapped_chunks_and_resume(self):
+        """走 AI 分支（假组件）：多段并行编码、混合强度、取消后续跑。"""
+        out, work = self.tmp / "ai.mp4", self.tmp / "work"
+        cancel = threading.Event()
+        settings = JobSettings(model="realesr-animevideov3", strength=0.4, target="1080p")
+        with self.assertRaises(Cancelled):
+            Pipeline(self.src, out, settings, work, binary=FAKE_AI, chunk_frames=5, cancel=cancel,
+                     on_progress=lambda p: p.done >= 10 and cancel.set()).run()
+        self.assertGreaterEqual(len(list((work / "chunks").glob("c*.mp4"))), 1)
+        messages = []
+        Pipeline(self.src, out, settings, work, binary=FAKE_AI, chunk_frames=5,
+                 on_progress=lambda p: messages.append(p.message)).run()
+        info = probe(out)
+        self.assertEqual((info.width, info.height), (1920, 1080))
+        self.assertEqual(count_frames(out), 24)
+        self.assertFalse(work.exists())
 
     def test_no_audio(self):
         src = self.tmp / "silent.mp4"

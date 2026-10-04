@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -24,6 +25,9 @@ from .config import BITRATES, KNOWN_MODELS, NO_AI, TARGETS, JobSettings, ModelIn
 from .media import MediaError, VideoInfo, encoder_args, ffmpeg_bin, ffprobe_bin, probe, target_size
 
 CHUNK_FRAMES = 48
+# AI 输出用 JPEG（质量 100、4:4:4，与 PNG 的 PSNR 约 51dB，肉眼无差别）：
+# PNG 压缩 2K 图很耗 CPU，换成 JPEG 能省下 AI 组件存图的时间
+AI_FORMAT = "jpg"
 PIPELINE_VERSION = 1
 
 
@@ -102,14 +106,14 @@ def build_filter(settings: JobSettings, info: VideoInfo, size: tuple[int, int], 
 
 
 class Upscaler:
-    def __init__(self, binary: Path, model: ModelInfo, scale: int, tile: int = 0):
-        self.binary, self.model, self.scale, self.tile = binary, model, scale, tile
+    def __init__(self, binary: Path, model: ModelInfo, scale: int, tile: int = 0, fmt: str = AI_FORMAT):
+        self.binary, self.model, self.scale, self.tile, self.fmt = binary, model, scale, tile, fmt
 
-    def _cmd(self, src: Path, dst: Path) -> list[str]:
+    def _cmd(self, src: Path, dst: Path, fmt: str | None = None) -> list[str]:
         return [str(self.binary), "-i", str(src), "-o", str(dst),
                 "-n", self.model.key, "-s", str(self.scale),
                 "-m", str(self.binary.parent / "models"),
-                "-t", str(self.tile), "-f", "png"]
+                "-t", str(self.tile), "-f", fmt or self.fmt]
 
     def run_dir(self, src: Path, dst: Path, on_tick: Callable[[int], None] | None = None,
                 cancel: threading.Event | None = None) -> None:
@@ -126,7 +130,7 @@ class Upscaler:
                         proc.kill()
                     raise Cancelled()
                 if on_tick:
-                    on_tick(sum(1 for _ in dst.glob("*.png")))
+                    on_tick(sum(1 for _ in dst.glob(f"*.{self.fmt}")))
                 time.sleep(0.4)
             if proc.returncode != 0:
                 log.seek(0)
@@ -134,7 +138,7 @@ class Upscaler:
                 raise MediaError("AI 超分失败（可尝试把分块大小调小）：\n" + "\n".join(tail))
 
     def run_file(self, src: Path, dst: Path) -> None:
-        _run(self._cmd(src, dst), what="AI 超分")
+        _run(self._cmd(src, dst, dst.suffix.lstrip(".")), what="AI 超分")
 
 
 # ---------- 主流程 ----------
@@ -186,6 +190,7 @@ class Pipeline:
             _run([ffmpeg_bin(), "-v", "error", "-y", "-i", str(self.src), "-map", "0:v:0",
                   "-fps_mode", "passthrough",
                   "-vf", f"scale=in_color_matrix={_matrix(info)}:in_range=tv,format=rgb24",
+                  "-compression_level", "1",  # 临时帧，用最快的压缩
                   "-start_number", "0", str(frames / "%06d.png")], self.cancel, "拆帧")
             done.write_text(str(sum(1 for _ in frames.glob("*.png"))))
         return int(done.read_text())
@@ -195,7 +200,7 @@ class Pipeline:
         frames = self.work / "frames"
         inputs: list[str] = []
         if use_ai:
-            inputs += ["-framerate", fps, "-start_number", str(start), "-i", str(ai_dir / "%06d.png")]
+            inputs += ["-framerate", fps, "-start_number", str(start), "-i", str(ai_dir / f"%06d.{AI_FORMAT}")]
         inputs += ["-framerate", fps, "-start_number", str(start), "-i", str(frames / "%06d.png")]
         gop = max(1, round(float(info.fps) * 2))
         venc, _ = encoder_args(bitrate, self.settings.codec, gop)
@@ -203,7 +208,7 @@ class Pipeline:
         _run([ffmpeg_bin(), "-v", "error", "-y", *inputs,
               "-filter_complex", build_filter(self.settings, info, size, use_ai),
               "-map", "[v]", "-frames:v", str(count), *venc, *_color_args(info),
-              "-an", str(tmp)], self.cancel, "编码")
+              "-an", str(tmp)], None, "编码")  # 暂停时让这一段编完（几秒），AI 结果不浪费
         os.replace(tmp, out)
 
     def _mux(self, info: VideoInfo, chunks: list[Path]) -> None:
@@ -267,44 +272,76 @@ class Pipeline:
             cur = processed + extra
             if cur > last["cur"]:
                 last["cur"], last["t"] = cur, now
-            eta = None
-            if last["cur"] > 0 and last["t"] - t0 > 3:
+            eta, label = None, (f"{model.label} ×{scale}" if use_ai else "传统放大")
+            # 前 8 帧包含加载模型等开销，速度和剩余时间都不准，先显示"估算中"
+            if last["cur"] >= min(8, total) and last["t"] - t0 > 3:
                 per_frame = (last["t"] - t0) / last["cur"]
                 remaining = total - done_frames - last["cur"]
                 eta = max(0.0, remaining * per_frame - (now - last["t"]))
-            self.on_progress(Progress("upscale", int(done_frames + cur), total, eta,
-                                      f"{model.label} ×{scale}" if use_ai else "传统放大"))
+                label += f" · {per_frame:.2f} 秒/帧"
+            self.on_progress(Progress("upscale", int(done_frames + cur), total, eta, label))
 
         report()
-        for start, chunk in zip(starts, chunks):
-            if self.cancel.is_set():
-                raise Cancelled()
-            if chunk.exists():
-                continue
-            count = min(self.chunk_frames, total - start)
-            ai_dir = self.work / "ai"
-            if use_ai:
-                cin = self.work / "cin"
-                shutil.rmtree(cin, ignore_errors=True)
-                shutil.rmtree(ai_dir, ignore_errors=True)
-                cin.mkdir()
-                for n in range(start, start + count):
-                    name = f"{n:06d}.png"
-                    try:  # 硬链接：不占额外空间；realesrgan 会跳过符号链接
-                        os.link(frames / name, cin / name)
-                    except OSError:
-                        shutil.copy2(frames / name, cin / name)
-                upscaler.run_dir(cin, ai_dir, on_tick=lambda n: report(min(n, count) * 0.95),
-                                 cancel=self.cancel)
-                got = sum(1 for _ in ai_dir.glob("*.png"))
-                if got != count:
-                    raise MediaError(f"AI 超分输出帧数不对（{got}/{count}）")
-            self._encode_chunk(info, size, use_ai, start, count, ai_dir, chunk, bitrate)
-            if use_ai:
-                shutil.rmtree(self.work / "cin", ignore_errors=True)
-                shutil.rmtree(ai_dir, ignore_errors=True)
-            processed += count
-            report()
+        for d in list(self.work.glob("cin*")) + list(self.work.glob("ai*")):
+            shutil.rmtree(d, ignore_errors=True)  # 上次中断留下的半成品
+
+        # GPU 超分第 N+1 段的同时，CPU 在后台编码第 N 段
+        encoder = ThreadPoolExecutor(max_workers=1)
+        pending = None  # (future, 要清理的目录)
+
+        def finish_pending() -> None:
+            nonlocal pending
+            if pending is None:
+                return
+            fut, dirs = pending
+            pending = None
+            try:
+                fut.result()
+            finally:
+                for d in dirs:
+                    shutil.rmtree(d, ignore_errors=True)
+
+        try:
+            for i, (start, chunk) in enumerate(zip(starts, chunks)):
+                if self.cancel.is_set():
+                    raise Cancelled()
+                if chunk.exists():
+                    continue
+                count = min(self.chunk_frames, total - start)
+                dirs: list[Path] = []
+                ai_dir = self.work / f"ai{i}"
+                if use_ai:
+                    cin = self.work / f"cin{i}"
+                    cin.mkdir()
+                    dirs = [cin, ai_dir]
+                    for n in range(start, start + count):
+                        name = f"{n:06d}.png"
+                        try:  # 硬链接：不占额外空间；realesrgan 会跳过符号链接
+                            os.link(frames / name, cin / name)
+                        except OSError:
+                            shutil.copy2(frames / name, cin / name)
+                    upscaler.run_dir(cin, ai_dir, on_tick=lambda n: report(min(n, count) * 0.95),
+                                     cancel=self.cancel)
+                    got = sum(1 for _ in ai_dir.glob(f"*.{AI_FORMAT}"))
+                    if got != count:
+                        raise MediaError(f"AI 超分输出帧数不对（{got}/{count}）")
+                finish_pending()  # 同一时间最多一段在编码
+                fut = encoder.submit(self._encode_chunk, info, size, use_ai, start, count,
+                                     ai_dir, chunk, bitrate)
+                pending = (fut, dirs)
+                processed += count
+                report()
+            finish_pending()
+        except BaseException:
+            # 出错或暂停：等后台那一段编完再退出，续跑时可以直接复用
+            if pending is not None:
+                try:
+                    finish_pending()
+                except BaseException:  # noqa: BLE001 —— 保留最初的异常
+                    pass
+            raise
+        finally:
+            encoder.shutdown(wait=True)
 
         self.on_progress(Progress("mux", total, total, 0, "正在合成音视频"))
         self._mux(info, chunks)
