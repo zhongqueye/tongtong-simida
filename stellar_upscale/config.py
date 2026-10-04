@@ -40,7 +40,7 @@ KNOWN_MODELS = {
         "速度快；全强度会有\"AI 画\"感，写实画面建议 0.2–0.4", 0.3),
     "realesrgan-x4plus": ModelInfo(
         "realesrgan-x4plus", "精细", (4,),
-        "更偏写实，速度约为快速模式的 1/8", 0.5),
+        "更偏写实，但比快速模式慢约 30 倍（10 秒视频约 2 小时）", 0.5),
     "realesrgan-x4plus-anime": ModelInfo(
         "realesrgan-x4plus-anime", "二次元", (4,),
         "纯二次元画风", 1.0),
