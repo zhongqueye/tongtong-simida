@@ -197,14 +197,12 @@ class Pipeline:
         if use_ai:
             inputs += ["-framerate", fps, "-start_number", str(start), "-i", str(ai_dir / "%06d.png")]
         inputs += ["-framerate", fps, "-start_number", str(start), "-i", str(frames / "%06d.png")]
-        venc, _ = encoder_args(bitrate)
+        gop = max(1, round(float(info.fps) * 2))
+        venc, _ = encoder_args(bitrate, self.settings.codec, gop)
         tmp = out.with_suffix(".tmp.mp4")
-        m = _matrix(info)
         _run([ffmpeg_bin(), "-v", "error", "-y", *inputs,
               "-filter_complex", build_filter(self.settings, info, size, use_ai),
-              "-map", "[v]", "-frames:v", str(count), *venc,
-              "-colorspace", m, "-color_primaries", m if m == "bt709" else "smpte170m",
-              "-color_trc", m if m == "bt709" else "smpte170m", "-color_range", "tv",
+              "-map", "[v]", "-frames:v", str(count), *venc, *_color_args(info),
               "-an", str(tmp)], self.cancel, "编码")
         os.replace(tmp, out)
 
@@ -218,15 +216,26 @@ class Pipeline:
             base += ["-i", str(self.src), "-map", "0:v", "-map", "1:a:0"]
         else:
             base += ["-map", "0:v"]
-        tail = ["-c:v", "copy", "-tag:v", "hvc1"] if info_is_hevc(chunks[0]) else ["-c:v", "copy"]
-        tail += ["-movflags", "+faststart", str(part)]
-        audio_copy = ["-c:a", "copy"] if info.audio_codec == "aac" else ["-c:a", "aac", "-b:a", "192k"]
+        codec = video_codec(chunks[0])
+        # 把色彩信息同时写进码流和 MP4 容器，避免平台转码时按默认值猜测而偏色
+        prim, trc, mat = (1, 1, 1) if _matrix(info) == "bt709" else (6, 6, 6)
+        bsf = {"hevc": "hevc_metadata", "h264": "h264_metadata"}.get(codec)
+        tail = ["-c:v", "copy"]
+        if bsf:
+            tail += ["-bsf:v", f"{bsf}=colour_primaries={prim}:transfer_characteristics={trc}"
+                               f":matrix_coefficients={mat}:video_full_range_flag=0"]
+        if codec == "hevc":
+            tail += ["-tag:v", "hvc1"]
+        tail += [*_color_args(info), "-movflags", "+faststart+write_colr", str(part)]
+        # 平台和剪辑软件最常用 44.1/48kHz；Seedance 原片常是 32kHz，统一转成 48kHz AAC
+        reencode = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+        audio = ["-c:a", "copy"] if (info.audio_codec == "aac" and info.sample_rate in (44100, 48000)) else reencode
         try:
-            _run(base + (audio_copy if info.has_audio else []) + tail, self.cancel, "合成")
+            _run(base + (audio if info.has_audio else []) + tail, self.cancel, "合成")
         except MediaError:
             if not info.has_audio:
                 raise
-            _run(base + ["-c:a", "aac", "-b:a", "192k"] + tail, self.cancel, "合成")
+            _run(base + reencode + tail, self.cancel, "合成")
         os.replace(part, self.output)
 
     def run(self) -> Path:
@@ -304,11 +313,18 @@ class Pipeline:
         return self.output
 
 
-def info_is_hevc(path: Path) -> bool:
+def video_codec(path: Path) -> str:
     res = subprocess.run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0",
                           "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
                          capture_output=True, text=True)
-    return res.stdout.strip() == "hevc"
+    return res.stdout.strip()
+
+
+def _color_args(info: VideoInfo) -> list[str]:
+    bt709 = _matrix(info) == "bt709"
+    return ["-colorspace", "bt709" if bt709 else "smpte170m",
+            "-color_primaries", "bt709" if bt709 else "smpte170m",
+            "-color_trc", "bt709" if bt709 else "smpte170m", "-color_range", "tv"]
 
 
 # ---------- 单帧预览 ----------

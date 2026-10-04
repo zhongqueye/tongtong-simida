@@ -82,6 +82,7 @@ function renderSettings() {
 
   $$("#seg-target button").forEach((b) => b.classList.toggle("on", b.dataset.v === settings.target));
   $$("#seg-quality button").forEach((b) => b.classList.toggle("on", b.dataset.v === settings.quality));
+  $$("#seg-codec button").forEach((b) => b.classList.toggle("on", b.dataset.v === (settings.codec || "hevc")));
 
   renderSeg($("#seg-preset"), env.presets.map((p) => ({ v: p.key, label: p.label, title: p.desc })), settings.preset, (v) => {
     settings.preset = v;
@@ -154,6 +155,7 @@ function jobCard(j) {
     `<span class="tag cyan">${targetLabel(s.target)}</span>`,
     `<span class="tag">${esc(presetOf(s.preset).label)}</span>`,
     m && m.ai ? `<span class="tag">AI ${Math.round(s.strength * 100)}%</span>` : "",
+    s.codec === "h264" ? `<span class="tag">H.264</span>` : "",
   ].join("");
 
   let midTitle, midSub, progress;
@@ -396,6 +398,7 @@ function bindUI() {
 
   bindStaticSeg($("#seg-target"), "target");
   bindStaticSeg($("#seg-quality"), "quality");
+  bindStaticSeg($("#seg-codec"), "codec");
   bindRanges();
   $("#btn-out").onclick = async () => {
     const dir = await api.pick_folder();

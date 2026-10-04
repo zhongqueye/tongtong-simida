@@ -103,6 +103,7 @@ class JobSettings:
     preset_strength: float = 1.0   # 调色强度
     grain: float = 0.3             # 胶片颗粒 0–1，让画面不过分光滑
     quality: str = "standard"
+    codec: str = "hevc"            # hevc（体积小）/ h264（兼容性最好）
     output_dir: str = ""           # 为空则输出到原视频所在目录
     tile: int = 0                  # realesrgan 分块大小，0 = 自动
 

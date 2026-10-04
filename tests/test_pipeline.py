@@ -18,7 +18,7 @@ from stellar_upscale.pipeline import Cancelled, Pipeline, render_preview  # noqa
 def make_clip(path: Path, w=320, h=180, seconds=1, fps=24, audio=True):
     cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=s={w}x{h}:r={fps}:d={seconds}"]
     if audio:
-        cmd += ["-f", "lavfi", "-i", f"sine=f=440:d={seconds}", "-c:a", "aac"]
+        cmd += ["-f", "lavfi", "-i", f"sine=f=440:d={seconds}:sample_rate=32000", "-c:a", "aac"]
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", str(path)]
     subprocess.run(cmd, check=True)
 
@@ -79,6 +79,21 @@ class PipelineTest(unittest.TestCase):
                      binary=None, chunk_frames=8).run()
         out = self.tmp / "b.mp4"
         Pipeline(self.src, out, JobSettings(preset="cinema", **NO_AI), work, binary=None, chunk_frames=8).run()
+        self.assertEqual(count_frames(out), 24)
+
+    def test_h264_and_platform_compat(self):
+        out = self.tmp / "out.mp4"
+        Pipeline(self.src, out, JobSettings(target="1080p", codec="h264", **NO_AI), self.tmp / "w",
+                 binary=None, chunk_frames=10).run()
+        res = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                              "stream=codec_name,color_primaries,color_transfer,color_space,sample_rate",
+                              "-of", "json", str(out)], capture_output=True, text=True, check=True)
+        import json
+        v, a = json.loads(res.stdout)["streams"]
+        self.assertEqual(v["codec_name"], "h264")
+        self.assertEqual((v["color_primaries"], v["color_transfer"], v["color_space"]),
+                         ("bt709", "bt709", "bt709"))
+        self.assertEqual(a["sample_rate"], "48000")
         self.assertEqual(count_frames(out), 24)
 
     def test_no_audio(self):

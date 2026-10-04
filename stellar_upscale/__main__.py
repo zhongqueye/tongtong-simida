@@ -40,12 +40,14 @@ def main(argv=None) -> int:
     ap.add_argument("--preset-strength", type=float, default=1.0, help="调色强度 0–1.5")
     ap.add_argument("-g", "--grain", type=float, default=0.3, help="胶片颗粒 0–1")
     ap.add_argument("-q", "--quality", choices=["standard", "high"], default="standard")
+    ap.add_argument("-c", "--codec", choices=["hevc", "h264"], default="hevc",
+                    help="hevc（体积小）/ h264（兼容性最好）")
     ap.add_argument("--tile", type=int, default=0, help="AI 分块大小，0=自动；内存不足时设 256")
     args = ap.parse_args(argv)
 
     settings = JobSettings(model=args.model, strength=args.strength, target=args.target,
                            preset=args.preset, preset_strength=args.preset_strength,
-                           quality=args.quality, grain=args.grain, output_dir=args.output_dir, tile=args.tile)
+                           quality=args.quality, codec=args.codec, grain=args.grain, output_dir=args.output_dir, tile=args.tile)
     cancel = threading.Event()
     rc = 0
     for src in args.inputs:

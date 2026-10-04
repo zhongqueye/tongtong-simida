@@ -56,6 +56,7 @@ class VideoInfo:
     bitrate: int  # bps
     color_space: str = ""
     audio_codec: str = ""
+    sample_rate: int = 0
 
     @property
     def fps_str(self) -> str:
@@ -103,6 +104,7 @@ def probe(path: str | Path) -> VideoInfo:
         bitrate=int(data.get("format", {}).get("bit_rate") or 0),
         color_space=v.get("color_space", ""),
         audio_codec=astreams[0].get("codec_name", "") if astreams else "",
+        sample_rate=int(astreams[0].get("sample_rate") or 0) if astreams else 0,
     )
 
 
@@ -128,17 +130,27 @@ def encoders() -> frozenset:
     return frozenset(names)
 
 
-def encoder_args(bitrate_mbps: int) -> tuple[list[str], str]:
-    """返回 (编码参数, 编码器说明)。优先 Apple 硬件 HEVC。"""
+def encoder_args(bitrate_mbps: int, codec: str = "hevc", gop: int = 48) -> tuple[list[str], str]:
+    """返回 (编码参数, 编码器说明)。codec = hevc / h264，优先 Apple 硬件编码。
+
+    gop：关键帧最大间隔（帧），约 2 秒一个关键帧，兼顾画质与拖动进度条。
+    """
     enc = encoders()
-    b = f"{bitrate_mbps}M"
+    b, maxrate = f"{bitrate_mbps}M", f"{int(bitrate_mbps * 1.5)}M"
+    g = ["-g", str(gop)]
+    if codec == "h264":
+        if "h264_videotoolbox" in enc:
+            return (["-c:v", "h264_videotoolbox", "-b:v", b, "-maxrate", maxrate, *g,
+                     "-profile:v", "high"], "H.264（Apple 硬件）")
+        return (["-c:v", "libx264", "-preset", "medium", "-b:v", b, "-maxrate", maxrate,
+                 "-bufsize", maxrate, *g, "-profile:v", "high"], "H.264（软件）")
     if "hevc_videotoolbox" in enc:
-        return (["-c:v", "hevc_videotoolbox", "-b:v", b, "-maxrate", f"{int(bitrate_mbps * 1.5)}M",
+        return (["-c:v", "hevc_videotoolbox", "-b:v", b, "-maxrate", maxrate, *g,
                  "-tag:v", "hvc1", "-profile:v", "main"], "HEVC（Apple 硬件）")
     if "libx265" in enc:
-        return (["-c:v", "libx265", "-preset", "medium", "-b:v", b, "-tag:v", "hvc1",
+        return (["-c:v", "libx265", "-preset", "medium", "-b:v", b, *g, "-tag:v", "hvc1",
                  "-x265-params", "log-level=error"], "HEVC（软件）")
-    return (["-c:v", "libx264", "-preset", "medium", "-b:v", b], "H.264（软件）")
+    return (["-c:v", "libx264", "-preset", "medium", "-b:v", b, *g], "H.264（软件）")
 
 
 def target_size(info: VideoInfo, short_side: int) -> tuple[int, int]:
